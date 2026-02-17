@@ -1,0 +1,83 @@
+Metadata-Version: 2.4
+Name: museCLI
+Version: 0.1.0
+Summary: MuseCLI: Prototype command-line tool
+Author: Ibrahim Naqib
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: typer<1.0,>=0.12
+Provides-Extra: dev
+Requires-Dist: pytest>=7; extra == "dev"
+
+# MuseCLI
+
+MuseCLI is a calm, offline mood and reflection logger that writes JSONL notes to a private journal directory and stays out of your way.
+
+## Setup
+
+```bash
+cd museCLI
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install --upgrade pip
+pip install -e .
+```
+
+## Commands
+
+- `muse check-in` — prompt for mood (1-5), optional tags, a short note, and an optional long reflection.
+- `muse today` — show today’s entries as a compact table with local times, mood, tags, and note preview.
+- `muse stats` — summarise a recent window (default seven days) with counts, averages, top tags, and a sparkline.
+- `muse export` — write CSV or JSONL exports for a chosen date window to your configured export folder.
+- `muse reflect` — open your editor with a gentle template and save the longer text alongside a mood check.
+- `muse settings` — list or update config keys such as `data_dir`, `export_dir`, or `date_format`, and reset when needed.
+- `muse version` — print the current version string.
+
+## Data Model
+
+Each entry is stored as one JSON object with the following fields:
+
+- `timestamp` — UTC ISO 8601 string.
+- `mood` — integer 1–5.
+- `tags` — list of short strings.
+- `note` — single-line note.
+- `long_note` — optional longer reflection text.
+
+## Storage Layout
+
+MuseCLI keeps data in `~/.musecli` by default:
+
+```
+.musecli/
+  config.json
+  journal/
+    2025/
+      02/
+        2025-02-05.jsonl
+  exports/
+```
+
+The journal tree shards entries by year, month, then day, storing one JSON line per entry.
+
+
+## Configuration
+
+MuseCLI reads settings from `~/.musecli/config.json`. Key values include:
+- `date_format` — controls how dates appear in commands such as `today` and `stats` (default `%Y-%m-%d`).
+- `editor` — fallback command when `$EDITOR` and `$VISUAL` are unset.
+- `export_dir` — default directory for exports; created on the first export.
+- `insights_enabled` and `debug` — reserved for future features, both default to `false`.
+
+Use `muse settings --key <name> --value <value>` to update a single key, or `muse settings --reset` to return to defaults while keeping the data directory.
+
+## Development
+
+Install the optional development dependencies and run the tests:
+
+```bash
+pip install -e .[dev]
+python -m pytest
+```
+
+Pytest exercises the CLI with temporary directories, so it leaves no journal data behind.
+
