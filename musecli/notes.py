@@ -208,6 +208,8 @@ def query_entries(
     query: str | None = None,
     tags: Sequence[str] = (),
     kind: str | None = None,
+    project: str | None = None,
+    source: str | None = None,
     since: str | None = None,
     until: str | None = None,
     include_archived: bool = False,
@@ -231,6 +233,12 @@ def query_entries(
     if kind:
         where.append("e.kind = ?")
         params.append(kind.strip().lower())
+    if project:
+        where.append("e.project = ?")
+        params.append(project.strip())
+    if source:
+        where.append("e.source = ?")
+        params.append(source.strip().lower())
     if since:
         where.append("e.created_at >= ?")
         params.append(parse_temporal_filter(since, is_end=False))
@@ -496,6 +504,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
             text TEXT NOT NULL,
             url TEXT,
             title TEXT,
+            project TEXT,
+            source TEXT NOT NULL,
             tags_json TEXT NOT NULL,
             archived INTEGER NOT NULL
         )
@@ -511,11 +521,30 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    _ensure_entry_columns(conn)
+    _ensure_fts_table(conn)
+
+
+def _ensure_entry_columns(conn: sqlite3.Connection) -> None:
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(entries)")
+    }
+    if "project" not in columns:
+        conn.execute("ALTER TABLE entries ADD COLUMN project TEXT")
+    if "source" not in columns:
+        conn.execute("ALTER TABLE entries ADD COLUMN source TEXT NOT NULL DEFAULT 'cli'")
+
+
+def _ensure_fts_table(conn: sqlite3.Connection) -> None:
+    target = ["id", "text", "title", "url", "project", "source", "tags"]
+    existing = [row[1] for row in conn.execute("PRAGMA table_info(entry_fts)")]
+    if existing and existing != target:
+        conn.execute("DROP TABLE entry_fts")
     try:
         conn.execute(
             """
             CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts
-            USING fts5(id, text, title, url, tags)
+            USING fts5(id, text, title, url, project, source, tags)
             """
         )
     except sqlite3.OperationalError as exc:
@@ -525,8 +554,8 @@ def _init_schema(conn: sqlite3.Connection) -> None:
 def _upsert_entry(conn: sqlite3.Connection, entry: NoteEntry) -> None:
     conn.execute(
         """
-        INSERT INTO entries (id, created_at, updated_at, kind, text, url, title, tags_json, archived)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO entries (id, created_at, updated_at, kind, text, url, title, project, source, tags_json, archived)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
             created_at = excluded.created_at,
             updated_at = excluded.updated_at,
@@ -534,6 +563,8 @@ def _upsert_entry(conn: sqlite3.Connection, entry: NoteEntry) -> None:
             text = excluded.text,
             url = excluded.url,
             title = excluded.title,
+            project = excluded.project,
+            source = excluded.source,
             tags_json = excluded.tags_json,
             archived = excluded.archived
         """,
@@ -545,6 +576,8 @@ def _upsert_entry(conn: sqlite3.Connection, entry: NoteEntry) -> None:
             entry.text,
             entry.url,
             entry.title,
+            entry.project,
+            entry.source,
             json.dumps(list(entry.tags), separators=(",", ":")),
             1 if entry.archived else 0,
         ),
@@ -557,8 +590,16 @@ def _upsert_entry(conn: sqlite3.Connection, entry: NoteEntry) -> None:
         )
     conn.execute("DELETE FROM entry_fts WHERE id = ?", (entry.id,))
     conn.execute(
-        "INSERT INTO entry_fts (id, text, title, url, tags) VALUES (?, ?, ?, ?, ?)",
-        (entry.id, entry.text, entry.title or "", entry.url or "", " ".join(entry.tags)),
+        "INSERT INTO entry_fts (id, text, title, url, project, source, tags) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            entry.id,
+            entry.text,
+            entry.title or "",
+            entry.url or "",
+            entry.project or "",
+            entry.source,
+            " ".join(entry.tags),
+        ),
     )
 
 
@@ -572,6 +613,8 @@ def _row_to_entry(row: sqlite3.Row) -> NoteEntry:
         text=str(row["text"]),
         url=_optional_text(row["url"]),
         title=_optional_text(row["title"]),
+        project=_optional_text(row["project"]),
+        source=str(row["source"] or "cli"),
         tags=tuple(str(tag) for tag in tags if str(tag).strip()),
         archived=bool(row["archived"]),
     )
