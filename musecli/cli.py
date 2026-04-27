@@ -7,7 +7,7 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import TextIO
+from typing import Optional, TextIO
 
 import click
 import typer
@@ -99,7 +99,7 @@ def _set_context(ctx: typer.Context, *, config: AppConfig) -> None:
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    data_dir: Path | None = typer.Option(None, help="Override the data directory for this invocation."),
+    data_dir: Optional[Path] = typer.Option(None, help="Override the data directory for this invocation."),
 ) -> None:
     """Load config once per invocation and show the default home view."""
     if ctx.resilient_parsing:
@@ -130,7 +130,7 @@ def main(
 @app.command()
 def add(
     ctx: typer.Context,
-    text: str | None = typer.Argument(None),
+    text: Optional[str] = typer.Argument(None),
     stdin: bool = typer.Option(False, "--stdin", help="Read from stdin"),
     clipboard: bool = typer.Option(False, "--clipboard", help="Read from clipboard"),
 ) -> None:
@@ -226,8 +226,8 @@ def focus(ctx: typer.Context) -> None:
 @app.command("check-in")
 def check_in(
     ctx: typer.Context,
-    mood: str | None = typer.Option(None, "--mood", help="Mood rating 1-5."),
-    note: str | None = typer.Option(None, "--note", help="Short reflection note."),
+    mood: Optional[str] = typer.Option(None, "--mood", help="Mood rating 1-5."),
+    note: Optional[str] = typer.Option(None, "--note", help="Short reflection note."),
 ) -> None:
     """Capture a journal check-in."""
     resolved_mood, resolved_note = _resolve_check_in_input(mood=mood, note=note)
@@ -285,7 +285,7 @@ def _today_lines(entries: list[JournalEntry]) -> list[str]:
     return lines
 
 
-def _latest_entry(entries: list[JournalEntry]) -> JournalEntry | None:
+def _latest_entry(entries: list[JournalEntry]) -> Optional[JournalEntry]:
     return entries[-1] if entries else None
 
 
@@ -331,7 +331,7 @@ def _echo_lines(lines: list[str]) -> None:
     typer.echo("\n".join(lines))
 
 
-def _read_choice(valid: tuple[str, ...], prompt: str, *, stream: TextIO | None = None) -> str:
+def _read_choice(valid: tuple[str, ...], prompt: str, *, stream: Optional[TextIO] = None) -> str:
     while True:
         if sys.stdin.isatty():
             try:
@@ -362,8 +362,8 @@ def _choice_error_options(valid: tuple[str, ...]) -> str:
 
 def _resolve_check_in_input(
     *,
-    mood: str | None,
-    note: str | None,
+    mood: Optional[str],
+    note: Optional[str],
 ) -> tuple[int, str]:
     raw_mood = mood.strip() if mood is not None else None
     raw_note = note.strip() if note is not None else None
