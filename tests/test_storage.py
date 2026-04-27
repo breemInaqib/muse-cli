@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from musecli.model import AppConfig, JournalEntry
-from musecli.storage import append_entry, journal_root
+from musecli.config import AppConfig
+from musecli.journal import JournalEntry, append_entry, journal_root
 
 
 def test_append_entry_creates_journal_tree(tmp_path) -> None:
@@ -12,9 +12,7 @@ def test_append_entry_creates_journal_tree(tmp_path) -> None:
     entry = JournalEntry(
         timestamp=datetime(2024, 1, 1, 9, 30, tzinfo=timezone.utc),
         mood=4,
-        tags=("calm",),
         note="morning check",
-        long_note=None,
     )
 
     path, created = append_entry(entry, config)
@@ -27,5 +25,4 @@ def test_append_entry_creates_journal_tree(tmp_path) -> None:
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["mood"] == 4
-    assert payload["tags"] == ["calm"]
     assert payload["note"] == "morning check"

@@ -1,0 +1,17 @@
+.DS_Store
+.venv/
+.ropeproject/
+
+__pycache__/
+*.pyc
+*.pyo
+
+*.egg-info/
+dist/
+build/
+
+.pytest_cache/
+.ruff_cache/
+coverage.xml
+
+.muse-dev

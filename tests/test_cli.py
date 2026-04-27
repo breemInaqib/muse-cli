@@ -20,7 +20,7 @@ def _journal_path(base: Path) -> Path:
     )
 
 
-def test_check_in_and_today_flow(tmp_path) -> None:
+def test_check_in_and_today_flow(tmp_path: Path) -> None:
     runner = CliRunner()
 
     result = runner.invoke(
@@ -31,16 +31,12 @@ def test_check_in_and_today_flow(tmp_path) -> None:
             "check-in",
             "--mood",
             "4",
-            "--tags",
-            "calm",
             "--note",
-            "test note",
-            "--long-note",
-            "",
-            "--skip-editor",
+            "steady",
         ],
     )
-    assert result.exit_code == 0, result.stdout
+    assert result.exit_code == 0, result.output
+    assert result.output == "saved\n"
 
     entry_path = _journal_path(tmp_path)
     assert entry_path.exists()
@@ -48,188 +44,26 @@ def test_check_in_and_today_flow(tmp_path) -> None:
     assert len(lines) == 1
     payload = json.loads(lines[0])
     assert payload["mood"] == 4
+    assert payload["note"] == "steady"
 
     today = runner.invoke(app, ["--data-dir", str(tmp_path), "today"])
-    assert today.exit_code == 0
-    assert "calm" in today.stdout
-    assert "test note" in today.stdout
+    assert today.exit_code == 0, today.output
+    assert today.output == "today\n\n  mood: 4\n  note: steady\n"
 
 
-def test_stats_empty_week(tmp_path) -> None:
+def test_today_shows_empty_state_when_no_check_in(tmp_path: Path) -> None:
     runner = CliRunner()
 
-    result = runner.invoke(app, ["--data-dir", str(tmp_path), "stats"])
+    today = runner.invoke(app, ["--data-dir", str(tmp_path), "today"])
 
-    assert result.exit_code == 0
-    assert "Entries: 0" in result.stdout
-    assert "Sparkline: " in result.stdout
-
-
-def test_export_writes_csv_headers(tmp_path) -> None:
-    runner = CliRunner()
-
-    check_in = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "check-in",
-            "--mood",
-            "3",
-            "--tags",
-            "focus",
-            "--note",
-            "export test",
-            "--long-note",
-            "",
-            "--skip-editor",
-        ],
-    )
-    assert check_in.exit_code == 0, check_in.stdout
-
-    output_path = tmp_path / "out.csv"
-    result = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "export",
-            "--format",
-            "csv",
-            "--output",
-            str(output_path),
-            "--days",
-            "1",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-    assert output_path.exists()
-    lines = output_path.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "timestamp,mood,tags,note,long_note"
+    assert today.exit_code == 0, today.output
+    assert today.output == "today\n\n  no check-in\n"
 
 
-def test_settings_update_persists(tmp_path) -> None:
+def test_check_in_flag_input_still_works(tmp_path: Path) -> None:
     runner = CliRunner()
 
     result = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "settings",
-            "--key",
-            "date_format",
-            "--value",
-            "%d/%m/%Y",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-
-    config_path = tmp_path / "config.json"
-    assert config_path.exists()
-    data = json.loads(config_path.read_text(encoding="utf-8"))
-    assert data["date_format"] == "%d/%m/%Y"
-
-
-
-def test_today_respects_date_format(tmp_path) -> None:
-    runner = CliRunner()
-    pattern = "%d/%m/%Y"
-
-    settings_result = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "settings",
-            "--key",
-            "date_format",
-            "--value",
-            pattern,
-        ],
-    )
-    assert settings_result.exit_code == 0, settings_result.stdout
-
-    outcome = runner.invoke(app, ["--data-dir", str(tmp_path), "today"])
-    assert outcome.exit_code == 0
-    expected_label = datetime.now().astimezone().date().strftime(pattern)
-    assert expected_label in outcome.stdout
-
-
-
-def test_export_empty_window_creates_header(tmp_path) -> None:
-    runner = CliRunner()
-    output_path = tmp_path / "empty.csv"
-
-    result = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "export",
-            "--format",
-            "csv",
-            "--output",
-            str(output_path),
-            "--days",
-            "1",
-        ],
-    )
-
-    assert result.exit_code == 0, result.stdout
-    assert output_path.exists()
-    lines = output_path.read_text(encoding="utf-8").splitlines()
-    assert lines[0] == "timestamp,mood,tags,note,long_note"
-    assert len(lines) == 1
-
-
-
-def test_timeline_lists_entries(tmp_path) -> None:
-    runner = CliRunner()
-    check_in = runner.invoke(
-        app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "check-in",
-            "--mood",
-            "3",
-            "--tags",
-            "focus",
-            "--note",
-            "timeline test",
-            "--long-note",
-            "",
-            "--skip-editor",
-        ],
-    )
-    assert check_in.exit_code == 0, check_in.stdout
-
-    result = runner.invoke(app, ["--data-dir", str(tmp_path), "timeline", "--days", "7"])
-
-    assert result.exit_code == 0, result.stdout
-    assert "timeline ready." in result.stdout
-    assert "focus" in result.stdout
-    assert "timeline test" in result.stdout
-
-
-
-def test_timeline_no_entries_message(tmp_path) -> None:
-    runner = CliRunner()
-
-    result = runner.invoke(app, ["--data-dir", str(tmp_path), "timeline"])
-
-    assert result.exit_code == 0, result.stdout
-    assert "no entries in the last 7 days" in result.stdout
-
-
-
-def test_timeline_tag_filter(tmp_path) -> None:
-    runner = CliRunner()
-
-    runner.invoke(
         app,
         [
             "--data-dir",
@@ -237,58 +71,90 @@ def test_timeline_tag_filter(tmp_path) -> None:
             "check-in",
             "--mood",
             "4",
-            "--tags",
-            "focus,calm",
             "--note",
-            "should appear",
-            "--long-note",
-            "",
-            "--skip-editor",
+            "steady",
         ],
     )
-    runner.invoke(
+
+    assert result.exit_code == 0, result.output
+    assert result.output == "saved\n"
+
+
+def test_check_in_requires_flags_only(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    missing_both = runner.invoke(
         app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "check-in",
-            "--mood",
-            "2",
-            "--tags",
-            "rest",
-            "--note",
-            "filtered out",
-            "--long-note",
-            "",
-            "--skip-editor",
-        ],
+        ["--data-dir", str(tmp_path), "check-in"],
     )
+    assert missing_both.exit_code == 1
+    assert missing_both.output == "error: provide --mood\n"
 
-    result = runner.invoke(
+    positional = runner.invoke(
         app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "timeline",
-            "--tag",
-            "focus",
-        ],
+        ["--data-dir", str(tmp_path), "check-in", "4", "steady"],
     )
+    assert positional.exit_code == 2
+    assert positional.output == "error: unexpected argument\n"
 
-    assert result.exit_code == 0, result.stdout
-    assert "should appear" in result.stdout
-    assert "filtered out" not in result.stdout
 
-    empty_result = runner.invoke(
+def test_check_in_requires_explicit_inputs(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    missing_note = runner.invoke(
         app,
-        [
-            "--data-dir",
-            str(tmp_path),
-            "timeline",
-            "--tag",
-            "missing",
-        ],
+        ["--data-dir", str(tmp_path), "check-in", "--mood", "4"],
     )
+    assert missing_note.exit_code == 1
+    assert missing_note.output == "error: provide --note\n"
 
-    assert empty_result.exit_code == 0, empty_result.stdout
-    assert "no entries in the last 7 days" in empty_result.stdout
+    missing_mood = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--note", "steady"],
+    )
+    assert missing_mood.exit_code == 1
+    assert missing_mood.output == "error: provide --mood\n"
+
+    blank_note = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--mood", "4", "--note", "   "],
+    )
+    assert blank_note.exit_code == 1
+    assert blank_note.output == "error: provide --note\n"
+
+    missing_value = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--mood"],
+    )
+    assert missing_value.exit_code == 2
+    assert missing_value.output == "error: provide --mood\n"
+
+    missing_note_value = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--mood", "4", "--note"],
+    )
+    assert missing_note_value.exit_code == 2
+    assert missing_note_value.output == "error: provide --note\n"
+
+    invalid_mood = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--mood", "6", "--note", "steady"],
+    )
+    assert invalid_mood.exit_code == 1
+    assert invalid_mood.output == "error: mood must be 1–5\n"
+
+    invalid_mood_text = runner.invoke(
+        app,
+        ["--data-dir", str(tmp_path), "check-in", "--mood", "bad", "--note", "steady"],
+    )
+    assert invalid_mood_text.exit_code == 1
+    assert invalid_mood_text.output == "error: mood must be 1–5\n"
+
+
+def test_today_rejects_unknown_option(tmp_path: Path) -> None:
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["--data-dir", str(tmp_path), "today", "--date", "2026-04-18"])
+
+    assert result.exit_code == 2
+    assert result.output == "error: unexpected option --date\n"

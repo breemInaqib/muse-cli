@@ -1,72 +1,193 @@
-# MuseCLI
+# museCLI
 
-MuseCLI is a calm, offline mood and reflection logger that writes JSONL notes to a private journal directory and stays out of your way.
+museCLI is a small, local-first CLI for capturing thoughts and working through them step by step.
 
-## Setup
+It is designed to feel calm, simple, and predictable to return to every day.
+
+Command: `muse`
+
+---
+
+## install
 
 ```bash
-cd museCLI
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install --upgrade pip
+pip install musecli
+```
+
+For development:
+
+```bash
 pip install -e .
 ```
 
-## Commands
+---
 
-- `muse check-in` — prompt for mood (1-5), optional tags, a short note, and an optional long reflection.
-- `muse today` — show today’s entries as a compact table with local times, mood, tags, and note preview.
-- `muse stats` — summarise a recent window (default seven days) with counts, averages, top tags, and a sparkline.
-- `muse export` — write CSV or JSONL exports for a chosen date window to your configured export folder.
-- `muse reflect` — open your editor with a gentle template and save the longer text alongside a mood check.
-- `muse settings` — list or update config keys such as `data_dir`, `export_dir`, or `date_format`, and reset when needed.
-- `muse version` — print the current version string.
+## flow
 
-## Data Model
-
-Each entry is stored as one JSON object with the following fields:
-
-- `timestamp` — UTC ISO 8601 string.
-- `mood` — integer 1–5.
-- `tags` — list of short strings.
-- `note` — single-line note.
-- `long_note` — optional longer reflection text.
-
-## Storage Layout
-
-MuseCLI keeps data in `~/.musecli` by default:
-
-```
-.musecli/
-  config.json
-  journal/
-    2025/
-      02/
-        2025-02-05.jsonl
-  exports/
+```text
+add -> inbox -> focus -> check-in -> today
 ```
 
-The journal tree shards entries by year, month, then day, storing one JSON line per entry.
+A simple loop:
 
+- capture something
+- decide what to do with it
+- keep a small set of active items
+- reflect briefly
 
-## Configuration
+---
 
-MuseCLI reads settings from `~/.musecli/config.json`. Key values include:
-- `date_format` — controls how dates appear in commands such as `today` and `stats` (default `%Y-%m-%d`).
-- `editor` — fallback command when `$EDITOR` and `$VISUAL` are unset.
-- `export_dir` — default directory for exports; created on the first export.
-- `insights_enabled` and `debug` — reserved for future features, both default to `false`.
+## home
 
-Use `muse settings --key <name> --value <value>` to update a single key, or `muse settings --reset` to return to defaults while keeping the data directory.
+Run `muse` to see your current state.
 
-## Development
+```text
+museCLI
 
-Install the optional development dependencies and run the tests:
+  inbox: 0
+
+focus
+  empty
+
+today
+  no check-in
+```
+
+This view shows:
+
+- how many items are waiting
+- what you are currently focused on
+- your latest check-in today
+
+---
+
+## capture
+
+Add something quickly:
 
 ```bash
-pip install -e .[dev]
-python -m pytest
+muse add "text"
+muse add --stdin
+muse add --clipboard  # uses clipboard if available
 ```
 
-Pytest exercises the CLI with temporary directories, so it leaves no journal data behind.
+Output:
 
+```text
+added
+```
+
+---
+
+## inbox
+
+Process items one at a time:
+
+```text
+inbox
+
+  task text
+
+  [k] keep   [d] discard   [p] pin   [q] quit
+```
+
+- `k` keep it
+- `d` discard it
+- `p` pin it to focus
+- `q` exit
+
+Empty:
+
+```text
+inbox
+
+  empty
+```
+
+---
+
+## focus
+
+Work through pinned items:
+
+```text
+focus
+
+  task text
+
+  [d] done   [q] quit
+```
+
+- `d` mark as done (removes it from focus)
+- `q` exit
+
+Empty:
+
+```text
+focus
+
+  empty
+```
+
+---
+
+## check-in
+
+Record a simple reflection:
+
+```bash
+muse check-in --mood 4 --note "steady"
+```
+
+Output:
+
+```text
+saved
+```
+
+---
+
+## today
+
+View today’s latest check-in:
+
+```text
+today
+
+  no check-in
+```
+
+or:
+
+```text
+today
+
+  mood: 4
+  note: steady
+```
+
+---
+
+## storage
+
+All data is stored locally in `~/.muse`:
+
+- queue: `~/.muse/muse.db`
+- journal: `~/.muse/journal/YYYY/MM/YYYY-MM-DD.jsonl`
+
+You can override the location:
+
+```bash
+muse --data-dir PATH
+```
+
+---
+
+## notes
+
+museCLI keeps things intentionally small.
+
+It is not a full note system or task manager.  
+It is a simple loop for capturing, deciding, focusing, and reflecting.
+
+The goal is to reduce noise, not organise everything.

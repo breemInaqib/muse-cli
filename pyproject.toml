@@ -3,20 +3,58 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "museCLI"
+name = "musecli"
 version = "0.1.0"
-description = "MuseCLI: Prototype command-line tool"
+description = "Local-first museCLI for capture, focus, and daily check-ins."
 authors = [{name = "Ibrahim Naqib"}]
 readme = "README.md"
 requires-python = ">=3.9"
+license = {text = "All rights reserved"}
+keywords = ["cli", "journal", "offline", "productivity", "sqlite", "typer"]
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "License :: Other/Proprietary License",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Utilities",
+]
 dependencies = [
   "typer>=0.12,<1.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/breemInaqib/museCLI"
+Repository = "https://github.com/breemInaqib/museCLI"
+Issues = "https://github.com/breemInaqib/museCLI/issues"
+Changelog = "https://github.com/breemInaqib/museCLI/blob/main/CHANGELOG.md"
 
 [project.scripts]
 muse = "musecli.cli:app"
 [project.optional-dependencies]
 dev = [
+  "build>=1.2.0",
   "pytest>=7",
+  "ruff>=0.6.0",
 ]
 
+[tool.setuptools.packages.find]
+include = ["musecli"]
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

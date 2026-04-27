@@ -1,4 +1,4 @@
-"""MuseCLI package."""
+"""Top-level package metadata for museCLI."""
 
 __all__ = ["__version__"]
 
