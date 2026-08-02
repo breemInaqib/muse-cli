@@ -164,16 +164,16 @@ presentations and requires each `/exit` request to finish with status 0.
 Forced termination is cleanup after a failed measurement, never a successful
 sample.
 
-The final post-change installed-wheel measurements were:
+The release-baseline installed-wheel measurements were:
 
 | Python | presentation | cold | warm median |
 | --- | --- | ---: | ---: |
-| 3.13.5 | simple | 84.3 ms | 88.3 ms |
-| 3.13.5 | workspace | 363.7 ms | 264.5 ms |
-| 3.9.6 | simple | 106.4 ms | 83.4 ms |
-| 3.9.6 | workspace | 1,289.2 ms | 1,247.6 ms |
+| 3.13.5 | simple | 86.8 ms | 82.8 ms |
+| 3.13.5 | workspace | 260.4 ms | 241.6 ms |
+| 3.9.6 | simple | 205.0 ms | 82.7 ms |
+| 3.9.6 | workspace | 1,282.6 ms | 1,246.7 ms |
 
-These were recorded on `2026-07-30` on macOS 26.5.2 arm64, using Textual
+These were recorded on `2026-08-02` on macOS 26.5.2 arm64, using Textual
 8.2.8, the built `musecli-0.1.0` wheel, and five warm samples. The helper
 prints its exact environment and timestamp. Cold results were visibly
 filesystem-cache-sensitive, so warm medians are the more useful comparison.

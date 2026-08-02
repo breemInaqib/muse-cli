@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Record the exact local, hosted-CI, and unobserved compatibility boundaries for
+  the release-ready baseline.
+
 - preserve incompatible or corrupt queue databases and SQLite sidecars instead of resetting them
 - surface malformed journal lines while preserving valid entries and original JSONL evidence
 - add deterministic source-distribution verification and stronger installed-wheel CI smoke checks

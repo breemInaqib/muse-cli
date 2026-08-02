@@ -77,6 +77,10 @@ real pseudo-terminal readiness checks; Windows uses generated-launcher,
 non-interactive, and framework-supported headless Textual checks. This does not
 claim that interactive Windows terminal behavior is identical to Unix PTYs.
 
+See [Release-readiness evidence](docs/release-readiness.md) for the precise
+separation between locally observed behavior, hosted CI coverage, and terminal
+behavior that remains unobserved.
+
 Textual is a declared runtime dependency but remains lazily imported: help,
 subcommands, and redirected snapshot startup do not start the TUI. Python 3.9
 Textual startup around 1.25 seconds remains a known performance limitation, not

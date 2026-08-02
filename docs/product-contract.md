@@ -334,9 +334,9 @@ Required future tests include:
 
 ### Data safety and compatibility
 
-- future incompatible storage handling preserving originals;
-- malformed journal evidence becoming visible;
-- destructive reset requiring explicit action;
+- incompatible storage handling preserving originals;
+- malformed journal evidence remaining visible while valid records are read;
+- no built-in destructive reset or migration path;
 - existing build, wheel, entry-point, and startup checks remaining intact;
 - Textual remaining lazily loaded;
 - supported Python versions decided using hosted CI evidence.
@@ -351,16 +351,19 @@ Reversible during the first slice:
 - context size and file limits, provided they remain deterministic and bounded;
 - activity grouping and display summaries.
 
-Deferred to hosted CI and release readiness:
+Resolved by the release baseline:
 
-- the current configured Python 3.9, 3.11, and 3.13 support matrix remains in
-  force until hosted evidence is reviewed;
-- Textual remains a required runtime dependency and lazily imported so
+- Python 3.9, 3.11, and 3.13 remain the supported matrix after hosted Ubuntu
+  verification;
+- Textual remains a required runtime dependency and is lazily imported so
   non-interactive workflows do not start the TUI;
-- any change to the Python 3.9/3.11/3.13 support policy;
-- whether Textual remains a required dependency;
-- implementation of the local-data recovery policy;
-- platform-specific release claims.
+- the local-data recovery policy is implemented for ordinary operations without
+  adding automatic migration, repair, or destructive reset;
+- platform claims are bounded to the checks recorded in
+  [release-readiness evidence](release-readiness.md).
+
+Reconsidering the Python floor or making Textual optional is deferred until
+measured maintenance or runtime costs justify a separate compatibility decision.
 
 Deferred to a later mutation-capable phase:
 

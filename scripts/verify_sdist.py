@@ -19,6 +19,7 @@ _REQUIRED_DEVELOPER_PATHS = {
     "docs/design.md",
     "docs/muse-code.md",
     "docs/product-contract.md",
+    "docs/release-readiness.md",
     "docs/recovery.md",
     "docs/workspace.md",
     "docs/decisions/README.md",
