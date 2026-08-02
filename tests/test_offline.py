@@ -12,6 +12,7 @@ class _NoNetworkSocket(socket.socket):
     def connect(self, *args, **kwargs):  # type: ignore[no-untyped-def]
         raise RuntimeError("network disabled for test")
 
+
 def test_cli_commands_do_not_require_network(tmp_path: Path, monkeypatch) -> None:
     runner = CliRunner()
     monkeypatch.setattr(socket, "socket", _NoNetworkSocket)

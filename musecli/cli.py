@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import sqlite3
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, TextIO
@@ -14,8 +14,20 @@ import typer
 from typer.core import TyperGroup
 
 from .config import AppConfig, config_path, load_config, save_config
-from .journal import JournalEntry, append_entry, read_entries_for_day
-from .queue import add_item, discard_item, inbox_count, init_db, keep_item, list_inbox_items, list_pinned_items
+from .journal import JournalEntry, JournalReadResult, append_entry, read_day
+from .queue import (
+    QueueCorruptError,
+    QueueIncompatibleError,
+    QueueLockedError,
+    QueueStorageError,
+    add_item,
+    discard_item,
+    inbox_count,
+    init_db,
+    keep_item,
+    list_inbox_items,
+    list_pinned_items,
+)
 from .utils import ClipboardUnavailableError, read_clipboard_text, truncate, utc_now
 
 _TEXT_WIDTH = 60
@@ -30,12 +42,21 @@ Flow:
   add -> inbox -> focus -> check-in -> today
 
 \b
-Run `muse` with no arguments for a focus snapshot.
+Run `muse` in a terminal for the simple local session.
+Use `muse --tui` for the full workspace.
+Redirected no-argument use keeps the focus snapshot.
 """.strip()
 
 
 class MuseGroup(TyperGroup):
     """Normalize Click/Typer parse errors into CLI-controlled messages."""
+
+    def collect_usage_pieces(self, ctx: click.Context) -> list[str]:
+        """Keep optional root-command usage stable across supported Typer releases."""
+        return [
+            "[COMMAND] [ARGS]..." if piece == "COMMAND [ARGS]..." else piece
+            for piece in super().collect_usage_pieces(ctx)
+        ]
 
     def main(
         self,
@@ -62,16 +83,16 @@ class MuseGroup(TyperGroup):
             if not standalone_mode:
                 raise
             click.echo(_click_error_message(exc), err=True)
-            raise SystemExit(exc.exit_code)
+            raise SystemExit(exc.exit_code) from None
         except click.Abort:
             if not standalone_mode:
                 raise
             click.echo("error: aborted", err=True)
-            raise SystemExit(1)
+            raise SystemExit(1) from None
         except click.exceptions.Exit as exc:
             if not standalone_mode:
                 raise
-            raise SystemExit(exc.exit_code)
+            raise SystemExit(exc.exit_code) from None
 
 
 app = typer.Typer(
@@ -99,11 +120,21 @@ def _set_context(ctx: typer.Context, *, config: AppConfig) -> None:
 @app.callback(invoke_without_command=True)
 def main(
     ctx: typer.Context,
-    data_dir: Optional[Path] = typer.Option(None, help="Override the data directory for this invocation."),
+    data_dir: Optional[Path] = typer.Option(
+        None,
+        help="Override the data directory for this invocation.",
+    ),
+    tui: bool = typer.Option(
+        False,
+        "--tui",
+        help="Open the full-screen visible workspace.",
+    ),
 ) -> None:
-    """Load config once per invocation and show the default home view."""
+    """Load config once and route commands or an interactive presentation."""
     if ctx.resilient_parsing:
         return
+    if tui and ctx.invoked_subcommand is not None:
+        _fail("error: --tui cannot be used with a command")
     base_dir = data_dir.expanduser() if data_dir else None
     config, warning = load_config(base_dir=base_dir)
     _set_context(ctx, config=config)
@@ -111,8 +142,13 @@ def main(
         typer.echo("error: config file was malformed; defaults were loaded", err=True)
     if ctx.invoked_subcommand is not None:
         return
+    interactive_terminal = _is_interactive_terminal()
+    if tui and not interactive_terminal:
+        _fail("error: --tui requires an interactive terminal")
     try:
         init_db(config)
+    except QueueStorageError as exc:
+        _fail_queue(exc, action="initialize storage")
     except (OSError, sqlite3.Error):
         _fail("error: could not initialize storage")
     if not config_path(config).exists():
@@ -120,11 +156,47 @@ def main(
             save_config(config)
         except OSError:
             _fail("error: could not save config")
+    if tui:
+        _run_interactive(config, initial_workspace=True)
+        raise AssertionError("unreachable")
+    if interactive_terminal:
+        try:
+            home_lines = _home_lines(config)
+        except QueueStorageError as exc:
+            _fail_queue(exc, action="load home")
+        except (RuntimeError, OSError, sqlite3.Error):
+            _fail("error: could not load home")
+        _run_interactive(config, initial_workspace=False, home_lines=home_lines)
+        raise AssertionError("unreachable")
     try:
         _echo_lines(_home_lines(config))
+    except QueueStorageError as exc:
+        _fail_queue(exc, action="load home")
     except (RuntimeError, OSError, sqlite3.Error):
         _fail("error: could not load home")
     raise typer.Exit()
+
+
+def _is_interactive_terminal() -> bool:
+    return sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def _run_interactive(
+    config: AppConfig,
+    *,
+    initial_workspace: bool,
+    home_lines: Iterable[str] = (),
+) -> None:
+    from .interactive import run_application
+    from .session import Presentation, SessionController
+
+    presentation = Presentation.WORKSPACE if initial_workspace else Presentation.SIMPLE
+    exit_code = run_application(
+        SessionController(config),
+        initial_presentation=presentation,
+        home_lines=home_lines,
+    )
+    raise typer.Exit(code=exit_code)
 
 
 @app.command()
@@ -158,6 +230,8 @@ def add(
         add_item(_get_config(ctx), text=body)
     except ValueError as exc:
         _fail(f"error: {exc}")
+    except QueueStorageError as exc:
+        _fail_queue(exc, action="write item")
     except (RuntimeError, OSError, sqlite3.Error):
         _fail("error: could not write item")
     typer.echo("added")
@@ -170,6 +244,8 @@ def inbox(ctx: typer.Context) -> None:
     stream = None if sys.stdin.isatty() else typer.get_text_stream("stdin")
     try:
         items = list_inbox_items(config)
+    except QueueStorageError as exc:
+        _fail_queue(exc, action="read queue")
     except (RuntimeError, OSError, sqlite3.Error):
         _fail("error: could not read queue")
     if not items:
@@ -184,17 +260,23 @@ def inbox(ctx: typer.Context) -> None:
         if choice == "k":
             try:
                 keep_item(config, item_id=item.id, pinned=False)
+            except QueueStorageError as exc:
+                _fail_queue(exc, action="update item")
             except (KeyError, RuntimeError, OSError, sqlite3.Error):
                 _fail("error: could not update item")
             continue
         if choice == "d":
             try:
                 discard_item(config, item_id=item.id)
+            except QueueStorageError as exc:
+                _fail_queue(exc, action="update item")
             except (KeyError, RuntimeError, OSError, sqlite3.Error):
                 _fail("error: could not update item")
             continue
         try:
             keep_item(config, item_id=item.id, pinned=True)
+        except QueueStorageError as exc:
+            _fail_queue(exc, action="update item")
         except (KeyError, RuntimeError, OSError, sqlite3.Error):
             _fail("error: could not update item")
 
@@ -206,6 +288,8 @@ def focus(ctx: typer.Context) -> None:
     stream = None if sys.stdin.isatty() else typer.get_text_stream("stdin")
     try:
         items = list_pinned_items(config)
+    except QueueStorageError as exc:
+        _fail_queue(exc, action="read queue")
     except (RuntimeError, OSError, sqlite3.Error):
         _fail("error: could not read queue")
     if not items:
@@ -219,6 +303,8 @@ def focus(ctx: typer.Context) -> None:
             return
         try:
             discard_item(config, item_id=item.id)
+        except QueueStorageError as exc:
+            _fail_queue(exc, action="update item")
         except (KeyError, RuntimeError, OSError, sqlite3.Error):
             _fail("error: could not update item")
 
@@ -249,14 +335,14 @@ def check_in(
 def today(ctx: typer.Context) -> None:
     """Show today's check-ins."""
     try:
-        entries = read_entries_for_day(datetime.now().astimezone().date(), _get_config(ctx))
+        entries = _read_today(_get_config(ctx))
     except OSError:
         _fail("error: could not read today")
     _echo_lines(_today_lines(entries))
 
 
 def _home_lines(config: AppConfig) -> list[str]:
-    entries = read_entries_for_day(datetime.now().astimezone().date(), config)
+    entries = _read_today(config)
     focus_items = list_pinned_items(config)[:3]
     lines = _render_view("museCLI", _render_detail(f"inbox: {inbox_count(config)}"))
     lines.append("")
@@ -287,6 +373,48 @@ def _today_lines(entries: list[JournalEntry]) -> list[str]:
 
 def _latest_entry(entries: list[JournalEntry]) -> Optional[JournalEntry]:
     return entries[-1] if entries else None
+
+
+def _read_today(config: AppConfig) -> list[JournalEntry]:
+    result = read_day(datetime.now().astimezone().date(), config)
+    if result.issues:
+        typer.echo(_journal_warning(result), err=True)
+    return list(result.entries)
+
+
+def _journal_warning(result: JournalReadResult) -> str:
+    location = "journal/" + "/".join(result.path.parts[-3:])
+    groups: list[str] = []
+    for kind in ("malformed JSON", "invalid record", "invalid encoding"):
+        lines = [str(issue.line_number) for issue in result.issues if issue.kind == kind]
+        if lines:
+            groups.append(f"{kind}: lines {', '.join(lines)}")
+    detail = "; ".join(groups)
+    count = len(result.issues)
+    label = "record" if count == 1 else "records"
+    return (
+        f"warning: {location} contains {count} malformed {label} ({detail}); "
+        "valid entries shown; original file preserved"
+    )
+
+
+def _fail_queue(exc: QueueStorageError, *, action: str) -> None:
+    if isinstance(exc, QueueIncompatibleError):
+        _fail(
+            "error: queue database is incompatible; original data was preserved; "
+            "move muse.db and its sidecars before retrying"
+        )
+    if isinstance(exc, QueueCorruptError):
+        _fail(
+            "error: queue database is corrupt; original data was preserved; "
+            "back up or move muse.db and its sidecars before retrying"
+        )
+    if isinstance(exc, QueueLockedError):
+        _fail(
+            "error: queue database is locked; original data was preserved; "
+            "close other muse processes and retry"
+        )
+    _fail(f"error: could not {action}; original queue data was preserved")
 
 
 def _item_text(text: str) -> str:
@@ -380,7 +508,7 @@ def _parse_mood(raw: str) -> int:
         value = int(raw)
     except ValueError:
         _fail("error: mood must be 1–5")
-        raise AssertionError("unreachable")
+        raise AssertionError("unreachable") from None
     if not 1 <= value <= 5:
         _fail("error: mood must be 1–5")
     return value
@@ -409,7 +537,9 @@ def _click_error_message(exc: click.ClickException) -> str:
         if option:
             return f"error: unexpected option {option}"
     message = exc.format_message()
-    if message.startswith("Got unexpected extra argument") or message.startswith("Got unexpected extra arguments"):
+    if message.startswith("Got unexpected extra argument") or message.startswith(
+        "Got unexpected extra arguments"
+    ):
         return "error: unexpected argument"
     if message.startswith("No such command"):
         command = message.split(":", 1)[1].strip()

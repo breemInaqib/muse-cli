@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,12 +9,11 @@ description = "Local-first museCLI for capture, focus, and daily check-ins."
 authors = [{name = "Ibrahim Naqib"}]
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "All rights reserved"}
+license = "LicenseRef-Proprietary"
 keywords = ["cli", "journal", "offline", "productivity", "sqlite", "typer"]
 classifiers = [
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
-  "License :: Other/Proprietary License",
   "Operating System :: MacOS",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: POSIX :: Linux",
@@ -27,26 +26,29 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-  "typer>=0.12,<1.0",
+  "textual>=8.2,<9",
+  "typer>=0.23,<0.25",
 ]
 
 [project.urls]
-Homepage = "https://github.com/breemInaqib/museCLI"
-Repository = "https://github.com/breemInaqib/museCLI"
-Issues = "https://github.com/breemInaqib/museCLI/issues"
-Changelog = "https://github.com/breemInaqib/museCLI/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/breemInaqib/muse-cli"
+Repository = "https://github.com/breemInaqib/muse-cli"
+Issues = "https://github.com/breemInaqib/muse-cli/issues"
+Changelog = "https://github.com/breemInaqib/muse-cli/blob/main/CHANGELOG.md"
 
 [project.scripts]
 muse = "musecli.cli:app"
+muse-code = "musecli.code_cli:app"
+
 [project.optional-dependencies]
 dev = [
   "build>=1.2.0",
   "pytest>=7",
-  "ruff>=0.6.0",
+  "ruff>=0.15.11,<0.16",
 ]
 
 [tool.setuptools.packages.find]
-include = ["musecli"]
+include = ["musecli", "musecli.*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"
@@ -55,6 +57,11 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+extend-exclude = ["build", "dist"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"musecli/cli.py" = ["B008", "UP045"]
+"musecli/code_cli.py" = ["B008", "UP045"]

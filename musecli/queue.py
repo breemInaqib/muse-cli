@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,26 @@ class InboxItem:
     text: str
     status: str
     pinned: bool
+
+
+class QueueStorageError(RuntimeError):
+    """Base class for a preserved queue database that cannot be used safely."""
+
+
+class QueueIncompatibleError(QueueStorageError):
+    """Raised when the queue schema or stored values are unsupported."""
+
+
+class QueueCorruptError(QueueStorageError):
+    """Raised when SQLite reports malformed queue data."""
+
+
+class QueueLockedError(QueueStorageError):
+    """Raised when another process prevents safe queue access."""
+
+
+class QueueUnavailableError(QueueStorageError):
+    """Raised when the queue cannot be accessed safely for another reason."""
 
 
 def db_path(config: AppConfig) -> Path:
@@ -159,8 +180,19 @@ def _list_items(
 ) -> list[InboxItem]:
     with _open_db(config) as conn:
         rows = conn.execute(f"{_ITEM_SELECT} {where} {order}").fetchall()
-    return [
-        InboxItem(
+    return [_row_to_item(row) for row in rows]
+
+
+def _get_item(conn: sqlite3.Connection, item_id: int) -> InboxItem | None:
+    row = conn.execute(f"{_ITEM_SELECT} WHERE id = ?", (item_id,)).fetchone()
+    if row is None:
+        return None
+    return _row_to_item(row)
+
+
+def _row_to_item(row: sqlite3.Row) -> InboxItem:
+    try:
+        return InboxItem(
             id=int(row["id"]),
             created_at=parse_timestamp(row["created_at"]),
             updated_at=parse_timestamp(row["updated_at"]),
@@ -168,40 +200,41 @@ def _list_items(
             status=_normalise_status(str(row["status"])),
             pinned=bool(row["pinned"]),
         )
-        for row in rows
-    ]
-
-
-def _get_item(conn: sqlite3.Connection, item_id: int) -> InboxItem | None:
-    row = conn.execute(f"{_ITEM_SELECT} WHERE id = ?", (item_id,)).fetchone()
-    if row is None:
-        return None
-    return InboxItem(
-        id=int(row["id"]),
-        created_at=parse_timestamp(row["created_at"]),
-        updated_at=parse_timestamp(row["updated_at"]),
-        text=str(row["text"]),
-        status=_normalise_status(str(row["status"])),
-        pinned=bool(row["pinned"]),
-    )
+    except (TypeError, ValueError) as exc:
+        raise QueueCorruptError("queue item data is invalid") from exc
 
 
 def _normalise_status(value: str) -> str:
     status = value.strip().lower()
-    return status if status in _ALLOWED_STATUSES else "inbox"
+    if status not in _ALLOWED_STATUSES:
+        raise QueueIncompatibleError("queue item status is unsupported")
+    return status
 
 
-def _open_db(config: AppConfig) -> sqlite3.Connection:
-    ensure_private_dir(config.data_dir)
-    path = db_path(config)
-    if _needs_schema_reset(path):
-        _reset_db(path)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode = WAL")
-    _init_schema(conn)
-    ensure_private_file(path)
-    return conn
+@contextmanager
+def _open_db(config: AppConfig) -> Iterator[sqlite3.Connection]:
+    """Open the queue without repairing, replacing, or deleting existing data."""
+    conn: sqlite3.Connection | None = None
+    try:
+        ensure_private_dir(config.data_dir)
+        path = db_path(config)
+        if path.exists():
+            _validate_existing_db(path)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode = WAL")
+        _init_schema(conn)
+        ensure_private_file(path)
+        yield conn
+    except QueueStorageError:
+        raise
+    except sqlite3.DatabaseError as exc:
+        raise _classify_database_error(exc) from exc
+    except OSError as exc:
+        raise QueueUnavailableError("queue storage is unavailable") from exc
+    finally:
+        if conn is not None:
+            conn.close()
 
 
 def _init_schema(conn: sqlite3.Connection) -> None:
@@ -218,18 +251,20 @@ def _init_schema(conn: sqlite3.Connection) -> None:
         """
     )
 
-    conn.execute("UPDATE items SET status = 'inbox' WHERE status NOT IN ('inbox', 'kept', 'discarded')")
-    conn.execute("UPDATE items SET pinned = 0 WHERE status <> 'kept'")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_status_created ON items(status, created_at DESC, id DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_items_focus ON items(pinned, updated_at DESC, id DESC)")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_items_status_created "
+        "ON items(status, created_at DESC, id DESC)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_items_focus ON items(pinned, updated_at DESC, id DESC)"
+    )
     conn.commit()
 
 
-def _needs_schema_reset(path: Path) -> bool:
-    if not path.exists():
-        return False
+def _validate_existing_db(path: Path) -> None:
+    """Validate existing queue metadata and values through a read-only connection."""
     try:
-        with sqlite3.connect(path) as conn:
+        with _connect_readonly(path) as conn:
             conn.row_factory = sqlite3.Row
             tables = [
                 str(row["name"])
@@ -243,12 +278,26 @@ def _needs_schema_reset(path: Path) -> bool:
                 ).fetchall()
             ]
             if not tables:
-                return False
+                raise QueueIncompatibleError("queue database has no supported schema")
             if tables != ["items"]:
-                return True
+                raise QueueIncompatibleError("queue database schema is incompatible")
             rows = conn.execute("PRAGMA table_info(items)").fetchall()
-    except sqlite3.DatabaseError:
-        return True
+            invalid_row = conn.execute(
+                """
+                SELECT 1
+                FROM items
+                WHERE status NOT IN ('inbox', 'kept', 'discarded')
+                   OR pinned NOT IN (0, 1)
+                   OR (status <> 'kept' AND pinned <> 0)
+                LIMIT 1
+                """
+            ).fetchone()
+    except QueueStorageError:
+        raise
+    except sqlite3.DatabaseError as exc:
+        raise _classify_database_error(exc) from exc
+    except OSError as exc:
+        raise QueueUnavailableError("queue storage is unavailable") from exc
 
     actual = [
         (
@@ -260,20 +309,24 @@ def _needs_schema_reset(path: Path) -> bool:
         )
         for row in rows
     ]
-    return actual != _EXPECTED_ITEMS_SCHEMA
+    if actual != _EXPECTED_ITEMS_SCHEMA:
+        raise QueueIncompatibleError("queue database schema is incompatible")
+    if invalid_row is not None:
+        raise QueueIncompatibleError("queue database contains unsupported values")
 
 
-def _reset_db(path: Path) -> None:
-    for target in (
-        path,
-        Path(f"{path}-wal"),
-        Path(f"{path}-shm"),
-        Path(f"{path}-journal"),
-    ):
-        try:
-            os.remove(target)
-        except FileNotFoundError:
-            continue
+def _connect_readonly(path: Path) -> sqlite3.Connection:
+    uri = f"{path.resolve().as_uri()}?mode=ro"
+    return sqlite3.connect(uri, uri=True, timeout=0)
+
+
+def _classify_database_error(exc: sqlite3.DatabaseError) -> QueueStorageError:
+    message = str(exc).lower()
+    if "locked" in message or "busy" in message:
+        return QueueLockedError("queue database is locked")
+    if "malformed" in message or "not a database" in message or "file is encrypted" in message:
+        return QueueCorruptError("queue database is corrupt")
+    return QueueUnavailableError("queue database is unavailable")
 
 
 def _require_item(conn: sqlite3.Connection, item_id: int) -> None:

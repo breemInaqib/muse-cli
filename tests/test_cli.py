@@ -12,11 +12,7 @@ from musecli.cli import app
 def _journal_path(base: Path) -> Path:
     today = datetime.now().astimezone().date()
     return (
-        base
-        / "journal"
-        / f"{today.year:04d}"
-        / f"{today.month:02d}"
-        / f"{today.isoformat()}.jsonl"
+        base / "journal" / f"{today.year:04d}" / f"{today.month:02d}" / f"{today.isoformat()}.jsonl"
     )
 
 

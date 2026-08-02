@@ -3,25 +3,37 @@
 ## Environment
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -e ".[dev]"
+uv sync --locked --extra dev
 ```
 
-## Checks
+This creates the locked development environment used by the source-checkout
+commands in the README. Without `uv`, create and activate `.venv` using the
+README's Unix/macOS or Windows instructions, then run
+`python -m pip install -e ".[dev]"`.
+
+## Verification
+
+On Unix and macOS, run the repository smoke checks first:
 
 ```bash
 ./scripts/check.sh
 ```
 
-## Packaging Smoke Tests
+Then run the explicit test, style, format, and build checks on every platform:
 
 ```bash
-python3 -m build
-python3 -m pip install -e .
-muse --help
+uv lock --check
+uv run --locked --extra dev python -m pytest
+uv run --locked --extra dev python -m ruff check .
+uv run --locked --extra dev python -m ruff format --check .
+uv run --locked --extra dev python -m build
+uv run --locked --extra dev python scripts/verify_wheel.py dist/musecli-0.1.0-py3-none-any.whl
+uv run --locked --extra dev python scripts/verify_sdist.py dist/musecli-0.1.0.tar.gz
 ```
+
+On Windows, the full pytest command includes the supported headless Textual
+workspace smoke tests. The pseudo-terminal startup measurement is Unix-only;
+see `docs/workspace.md` for the platform boundary.
 
 ## Workflow
 

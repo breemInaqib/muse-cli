@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Iterator, Mapping
+from typing import Any
 
 from .config import AppConfig
 from .utils import ensure_private_dir, ensure_private_file, iso_utc, parse_timestamp, to_utc
@@ -47,6 +48,31 @@ class JournalEntry:
         )
 
 
+@dataclass(frozen=True)
+class JournalIssue:
+    """One safely described malformed journal line."""
+
+    line_number: int
+    kind: str
+
+
+@dataclass(frozen=True)
+class JournalReadResult:
+    """Valid entries plus explicit degradation evidence for one journal file."""
+
+    path: Path
+    entries: tuple[JournalEntry, ...]
+    issues: tuple[JournalIssue, ...]
+
+
+class JournalReadError(RuntimeError):
+    """Raised when a strict journal read encounters malformed records."""
+
+    def __init__(self, result: JournalReadResult) -> None:
+        super().__init__("journal contains malformed records")
+        self.result = result
+
+
 def journal_root(config: AppConfig) -> Path:
     """Return the root folder for journal entries."""
     return config.journal_dir
@@ -75,26 +101,40 @@ def append_entry(entry: JournalEntry, config: AppConfig) -> tuple[Path, bool]:
 
 
 def read_entries_for_day(target: date, config: AppConfig) -> list[JournalEntry]:
-    """Read and sort all journal entries for one day."""
+    """Strictly read a day, failing visibly if any record is malformed."""
+    result = read_day(target, config)
+    if result.issues:
+        raise JournalReadError(result)
+    return list(result.entries)
+
+
+def read_day(target: date, config: AppConfig) -> JournalReadResult:
+    """Read valid records while retaining safe evidence of malformed lines."""
     path = day_path(target, config)
     if not path.exists():
-        return []
-    entries = list(_iter_entries(path))
-    entries.sort(key=lambda entry: entry.timestamp)
-    return entries
-
-
-def _iter_entries(path: Path) -> Iterator[JournalEntry]:
-    with path.open("r", encoding="utf-8") as handle:
-        for raw in handle:
-            line = raw.strip()
+        return JournalReadResult(path=path, entries=(), issues=())
+    entries: list[JournalEntry] = []
+    issues: list[JournalIssue] = []
+    with path.open("rb") as handle:
+        for line_number, raw in enumerate(handle, start=1):
+            try:
+                line = raw.decode("utf-8").strip()
+            except UnicodeDecodeError:
+                issues.append(JournalIssue(line_number=line_number, kind="invalid encoding"))
+                continue
             if not line:
                 continue
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                issues.append(JournalIssue(line_number=line_number, kind="malformed JSON"))
+                continue
+            if not isinstance(payload, Mapping):
+                issues.append(JournalIssue(line_number=line_number, kind="invalid record"))
                 continue
             try:
-                yield JournalEntry.from_dict(payload)
-            except ValueError:
-                continue
+                entries.append(JournalEntry.from_dict(payload))
+            except (TypeError, ValueError):
+                issues.append(JournalIssue(line_number=line_number, kind="invalid record"))
+    entries.sort(key=lambda entry: entry.timestamp)
+    return JournalReadResult(path=path, entries=tuple(entries), issues=tuple(issues))

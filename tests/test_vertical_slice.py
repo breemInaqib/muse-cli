@@ -19,18 +19,12 @@ def test_vertical_slice_output_shape_stays_stable(tmp_path) -> None:
     )
     assert inbox_result.exit_code == 0, inbox_result.output
     assert inbox_result.output == (
-        "inbox\n\n"
-        "  capture one thing\n\n"
-        "  [k] keep   [d] discard   [p] pin   [q] quit\n"
+        "inbox\n\n  capture one thing\n\n  [k] keep   [d] discard   [p] pin   [q] quit\n"
     )
 
     focus = runner.invoke(app, ["--data-dir", str(tmp_path), "focus"], input="d")
     assert focus.exit_code == 0, focus.output
-    assert focus.output == (
-        "focus\n\n"
-        "  capture one thing\n\n"
-        "  [d] done   [q] quit\n"
-    )
+    assert focus.output == ("focus\n\n  capture one thing\n\n  [d] done   [q] quit\n")
 
     check_in = runner.invoke(
         app,

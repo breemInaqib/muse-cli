@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +19,7 @@ def test_top_level_help_keeps_only_locked_commands() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0, result.output
-    assert "Usage: muse [OPTIONS] COMMAND [ARGS]..." in result.output
+    assert "Usage: muse [OPTIONS] [COMMAND] [ARGS]..." in result.output
     for command in [
         "add",
         "inbox",
@@ -35,7 +36,10 @@ def test_top_level_help_keeps_only_locked_commands() -> None:
     assert "╰" not in result.output
     assert "Flow:" in result.output
     assert "  add -> inbox -> focus -> check-in -> today" in result.output
-    assert "Run `muse` with no arguments for a focus snapshot." in result.output
+    assert "Run `muse` in a terminal for the simple local session." in result.output
+    assert "Use `muse --tui` for the full workspace." in result.output
+    assert "Redirected no-argument use keeps the focus snapshot." in result.output
+    assert "--tui" in result.output
     assert "shell" not in result.output.lower()
 
 
@@ -83,17 +87,49 @@ def test_no_args_prints_empty_home_view_and_exits(tmp_path: Path) -> None:
     assert (tmp_path / "config.json").exists()
 
 
+def test_non_interactive_snapshot_does_not_load_workspace_or_agent_index(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.delitem(sys.modules, "musecli.tui", raising=False)
+    monkeypatch.delitem(sys.modules, "musecli.workflow_index", raising=False)
+    monkeypatch.delitem(sys.modules, "musecli.agent.harness", raising=False)
+
+    result = CliRunner().invoke(app, ["--data-dir", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    assert "musecli.tui" not in sys.modules
+    assert "musecli.workflow_index" not in sys.modules
+    assert "musecli.agent.harness" not in sys.modules
+
+
 def test_no_args_home_view_summarises_focus_state(tmp_path: Path) -> None:
     runner = CliRunner()
     config = AppConfig.defaults(base_dir=tmp_path)
-    first = add_item(config, text="first pinned task", now=datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc))
-    second = add_item(config, text="second pinned task", now=datetime(2026, 4, 20, 8, 1, tzinfo=timezone.utc))
-    third = add_item(config, text="third pinned task", now=datetime(2026, 4, 20, 8, 2, tzinfo=timezone.utc))
-    fourth = add_item(config, text="fourth pinned task", now=datetime(2026, 4, 20, 8, 3, tzinfo=timezone.utc))
-    keep_item(config, item_id=first.id, pinned=True, now=datetime(2026, 4, 20, 9, 0, tzinfo=timezone.utc))
-    keep_item(config, item_id=second.id, pinned=True, now=datetime(2026, 4, 20, 9, 1, tzinfo=timezone.utc))
-    keep_item(config, item_id=third.id, pinned=True, now=datetime(2026, 4, 20, 9, 2, tzinfo=timezone.utc))
-    keep_item(config, item_id=fourth.id, pinned=True, now=datetime(2026, 4, 20, 9, 3, tzinfo=timezone.utc))
+    first = add_item(
+        config, text="first pinned task", now=datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc)
+    )
+    second = add_item(
+        config, text="second pinned task", now=datetime(2026, 4, 20, 8, 1, tzinfo=timezone.utc)
+    )
+    third = add_item(
+        config, text="third pinned task", now=datetime(2026, 4, 20, 8, 2, tzinfo=timezone.utc)
+    )
+    fourth = add_item(
+        config, text="fourth pinned task", now=datetime(2026, 4, 20, 8, 3, tzinfo=timezone.utc)
+    )
+    keep_item(
+        config, item_id=first.id, pinned=True, now=datetime(2026, 4, 20, 9, 0, tzinfo=timezone.utc)
+    )
+    keep_item(
+        config, item_id=second.id, pinned=True, now=datetime(2026, 4, 20, 9, 1, tzinfo=timezone.utc)
+    )
+    keep_item(
+        config, item_id=third.id, pinned=True, now=datetime(2026, 4, 20, 9, 2, tzinfo=timezone.utc)
+    )
+    keep_item(
+        config, item_id=fourth.id, pinned=True, now=datetime(2026, 4, 20, 9, 3, tzinfo=timezone.utc)
+    )
     append_entry(
         JournalEntry(
             timestamp=datetime.now().astimezone().replace(microsecond=0),

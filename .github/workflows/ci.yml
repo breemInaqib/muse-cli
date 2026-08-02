@@ -4,28 +4,287 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.9", "3.11", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.10.2"
       - name: Install
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          uv lock --check
+          uv sync --locked --extra dev
       - name: Tests
         env:
           TZ: UTC
           LC_ALL: C
-        run: python -m pytest
+        run: ./scripts/check.sh
       - name: Lint
         run: |
-          python -m ruff check .
-          python -m ruff format --check .
+          uv run --locked --extra dev ruff check .
+          uv run --locked --extra dev ruff format --check .
+
+  platform:
+    name: test (${{ matrix.os }}, 3.13)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.10.2"
+      - name: Install
+        run: |
+          uv lock --check
+          uv sync --locked --extra dev
+      - name: Headless tests
+        run: uv run --locked --extra dev python -m pytest
+      - name: Smoke-test generated console launchers
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          import subprocess
+
+          executable_dir = (
+              Path(".venv") / ("Scripts" if os.name == "nt" else "bin")
+          ).resolve()
+          executable_suffix = ".exe" if os.name == "nt" else ""
+          muse = executable_dir / f"muse{executable_suffix}"
+          muse_code = executable_dir / f"muse-code{executable_suffix}"
+          smoke_root = Path(os.environ["RUNNER_TEMP"]) / "muse-platform-smoke"
+          smoke_root.mkdir()
+
+          def run(*command: object) -> subprocess.CompletedProcess[str]:
+              return subprocess.run(
+                  [str(part) for part in command],
+                  check=False,
+                  capture_output=True,
+                  text=True,
+                  cwd=smoke_root,
+              )
+
+          muse_help = run(muse, "--help")
+          assert muse_help.returncode == 0, muse_help.stderr
+          assert "Usage: muse [OPTIONS] [COMMAND] [ARGS]..." in muse_help.stdout
+
+          snapshot = run(
+              muse,
+              "--data-dir",
+              smoke_root / "snapshot-data",
+          )
+          assert snapshot.returncode == 0, snapshot.stderr
+          assert snapshot.stdout.splitlines() == [
+              "museCLI",
+              "",
+              "  inbox: 0",
+              "",
+              "focus",
+              "  empty",
+              "",
+              "today",
+              "  no check-in",
+          ]
+
+          code_help = run(muse_code, "--help")
+          assert code_help.returncode == 0, code_help.stderr
+          assert "Usage: muse-code [OPTIONS] COMMAND [ARGS]..." in code_help.stdout
+
+          run_list = run(
+              muse_code,
+              "list",
+              "--data-dir",
+              smoke_root / "code-data",
+          )
+          assert run_list.returncode == 0, run_list.stderr
+          assert run_list.stdout == "muse-code runs\n\n  no saved runs\n"
+
+          tui_guard = run(
+              muse,
+              "--data-dir",
+              smoke_root / "tui-data",
+              "--tui",
+          )
+          assert tui_guard.returncode == 1
+          assert tui_guard.stdout == ""
+          assert tui_guard.stderr == "error: --tui requires an interactive terminal\n"
+      - name: Verify macOS simple and workspace readiness
+        if: runner.os == 'macOS'
+        run: |
+          uv run --locked --extra dev python scripts/measure_startup.py \
+            --muse .venv/bin/muse \
+            --warm-runs 1 \
+            --data-dir "${RUNNER_TEMP}/muse-platform-pty-data"
+
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.10.2"
+      - name: Install build environment
+        run: |
+          uv lock --check
+          uv sync --locked --extra dev
+      - name: Build source distribution and wheel
+        run: uv run --locked --extra dev python -m build
+      - name: Verify wheel contents and entry points
+        run: >-
+          uv run --locked --extra dev python scripts/verify_wheel.py
+          dist/musecli-0.1.0-py3-none-any.whl
+      - name: Verify source distribution contents
+        run: >-
+          uv run --locked --extra dev python scripts/verify_sdist.py
+          dist/musecli-0.1.0.tar.gz
+      - name: Record distribution hashes
+        run: sha256sum dist/musecli-0.1.0-py3-none-any.whl dist/musecli-0.1.0.tar.gz
+      - name: Install and smoke-test wheel outside the checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_env="${RUNNER_TEMP}/muse-wheel"
+          smoke_dir="${RUNNER_TEMP}/muse-smoke"
+          python -m venv "${package_env}"
+          "${package_env}/bin/python" -m pip install \
+            dist/musecli-0.1.0-py3-none-any.whl
+          "${package_env}/bin/python" -m pip check
+          mkdir -p "${smoke_dir}"
+          cd "${smoke_dir}"
+          "${package_env}/bin/python" - \
+            "${package_env}/bin/muse" \
+            "${package_env}/bin/muse-code" \
+            "${package_env}" \
+            "${RUNNER_TEMP}" <<'PY'
+          import musecli
+          from musecli.agent.audit import JsonlTraceStore
+          from pathlib import Path
+          import subprocess
+          import sys
+
+          muse, muse_code, package_env, temp = sys.argv[1:]
+          temp_path = Path(temp)
+          assert Path(musecli.__file__).resolve().is_relative_to(Path(package_env).resolve())
+
+          def run(*command: str) -> subprocess.CompletedProcess[str]:
+              return subprocess.run(
+                  command,
+                  check=False,
+                  capture_output=True,
+                  text=True,
+              )
+
+          muse_help = run(muse, "--help")
+          assert muse_help.returncode == 0, muse_help.stderr
+          assert "Usage: muse [OPTIONS] [COMMAND] [ARGS]..." in muse_help.stdout
+          assert "muse --tui" in muse_help.stdout
+
+          snapshot = run(
+              muse,
+              "--data-dir",
+              str(temp_path / "snapshot-data"),
+          )
+          assert snapshot.returncode == 0, snapshot.stderr
+          assert snapshot.stdout.splitlines() == [
+              "museCLI",
+              "",
+              "  inbox: 0",
+              "",
+              "focus",
+              "  empty",
+              "",
+              "today",
+              "  no check-in",
+          ]
+
+          code_help = run(muse_code, "--help")
+          assert code_help.returncode == 0, code_help.stderr
+          assert "Usage: muse-code [OPTIONS] COMMAND [ARGS]..." in code_help.stdout
+          assert "list" in code_help.stdout
+          assert "inspect" in code_help.stdout
+
+          run_list = run(
+              muse_code,
+              "list",
+              "--data-dir",
+              str(temp_path / "code-data"),
+          )
+          assert run_list.returncode == 0, run_list.stderr
+          assert run_list.stdout == "muse-code runs\n\n  no saved runs\n"
+
+          evidence_root = temp_path / "inspect-data"
+          store = JsonlTraceStore(evidence_root / "agent" / "runs")
+          store.record(
+              "installed-smoke",
+              "run_started",
+              {
+                  "objective": "Verify installed inspection",
+                  "specification": "Render synthetic local evidence.",
+                  "specification_digest": "installed-smoke",
+              },
+          )
+          store.record(
+              "installed-smoke",
+              "run_failed",
+              {"phase": "model", "error": "synthetic package smoke failure"},
+          )
+          store.record(
+              "installed-smoke",
+              "run_evaluated",
+              {"passed": True, "checks": []},
+          )
+          store.record("installed-smoke", "run_completed", {"status": "failed"})
+          inspected = run(
+              muse_code,
+              "inspect",
+              "installed-smoke",
+              "--data-dir",
+              str(evidence_root),
+          )
+          assert inspected.returncode == 0, inspected.stderr
+          assert "  status: failed\n" in inspected.stdout
+          assert "  trace controls: pass\n" in inspected.stdout
+
+          tui_guard = run(
+              muse,
+              "--data-dir",
+              str(temp_path / "tui-data"),
+              "--tui",
+          )
+          assert tui_guard.returncode == 1
+          assert tui_guard.stdout == ""
+          assert tui_guard.stderr == "error: --tui requires an interactive terminal\n"
+          PY
+      - name: Verify installed simple and workspace readiness
+        run: |
+          uv run --locked --extra dev python scripts/measure_startup.py \
+            --muse "${RUNNER_TEMP}/muse-wheel/bin/muse" \
+            --warm-runs 1 \
+            --data-dir "${RUNNER_TEMP}/muse-pty-data"

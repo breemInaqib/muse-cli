@@ -22,11 +22,7 @@ def test_add_uses_text_argument_and_stores_item(tmp_path) -> None:
 
     inbox = runner.invoke(app, ["--data-dir", str(tmp_path), "inbox"], input="q")
     assert inbox.exit_code == 0, inbox.output
-    assert inbox.output == (
-        "inbox\n\n"
-        "  hello\n\n"
-        "  [k] keep   [d] discard   [p] pin   [q] quit\n"
-    )
+    assert inbox.output == ("inbox\n\n  hello\n\n  [k] keep   [d] discard   [p] pin   [q] quit\n")
 
 
 def test_inbox_shows_empty_state_when_nothing_to_process(tmp_path) -> None:
@@ -81,11 +77,7 @@ def test_focus_quit_leaves_remaining_items_pinned(tmp_path) -> None:
 
     assert focus.exit_code == 0, focus.output
     assert focus.output == (
-        "focus\n\n"
-        "  third\n\n"
-        "  [d] done   [q] quit\n\n"
-        "  second\n\n"
-        "  [d] done   [q] quit\n"
+        "focus\n\n  third\n\n  [d] done   [q] quit\n\n  second\n\n  [d] done   [q] quit\n"
     )
     assert [item.text for item in list_pinned_items(config)] == ["second", "first"]
     with sqlite3.connect(tmp_path / "muse.db") as conn:
@@ -124,11 +116,7 @@ def test_focus_done_discards_pinned_item(tmp_path) -> None:
     focus = runner.invoke(app, ["--data-dir", str(tmp_path), "focus"], input="d")
 
     assert focus.exit_code == 0, focus.output
-    assert focus.output == (
-        "focus\n\n"
-        "  finish this\n\n"
-        "  [d] done   [q] quit\n"
-    )
+    assert focus.output == ("focus\n\n  finish this\n\n  [d] done   [q] quit\n")
     assert list_pinned_items(config) == []
     with sqlite3.connect(tmp_path / "muse.db") as conn:
         row = conn.execute(
@@ -206,18 +194,12 @@ def test_long_text_is_truncated_consistently_in_views(tmp_path) -> None:
     inbox = runner.invoke(app, ["--data-dir", str(tmp_path), "inbox"], input="p")
     assert inbox.exit_code == 0, inbox.output
     assert inbox.output == (
-        "inbox\n\n"
-        f"  {shown}\n\n"
-        "  [k] keep   [d] discard   [p] pin   [q] quit\n"
+        f"inbox\n\n  {shown}\n\n  [k] keep   [d] discard   [p] pin   [q] quit\n"
     )
 
     focus = runner.invoke(app, ["--data-dir", str(tmp_path), "focus"], input="q")
     assert focus.exit_code == 0, focus.output
-    assert focus.output == (
-        "focus\n\n"
-        f"  {shown}\n\n"
-        "  [d] done   [q] quit\n"
-    )
+    assert focus.output == (f"focus\n\n  {shown}\n\n  [d] done   [q] quit\n")
 
 
 def test_truncation_prefers_word_boundaries() -> None:
@@ -227,7 +209,9 @@ def test_truncation_prefers_word_boundaries() -> None:
 
 def test_read_choice_treats_keyboard_interrupt_as_quit(monkeypatch) -> None:
     monkeypatch.setattr("musecli.cli.typer.get_text_stream", lambda _name: object())
-    monkeypatch.setattr("musecli.cli.sys", SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True)))
+    monkeypatch.setattr(
+        "musecli.cli.sys", SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: True))
+    )
 
     def raise_interrupt() -> str:
         raise KeyboardInterrupt
@@ -239,7 +223,9 @@ def test_read_choice_treats_keyboard_interrupt_as_quit(monkeypatch) -> None:
 
 def test_read_choice_reuses_non_tty_stream_across_calls(monkeypatch) -> None:
     stream = io.StringIO("pq")
-    monkeypatch.setattr("musecli.cli.sys", SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: False)))
+    monkeypatch.setattr(
+        "musecli.cli.sys", SimpleNamespace(stdin=SimpleNamespace(isatty=lambda: False))
+    )
 
     assert _read_choice(("p", "q"), "prompt", stream=stream) == "p"
     assert _read_choice(("p", "q"), "prompt", stream=stream) == "q"
@@ -262,7 +248,7 @@ def test_invalid_choice_reprints_prompt_at_same_indent(tmp_path) -> None:
     )
 
 
-def test_add_resets_incompatible_database_schema(tmp_path) -> None:
+def test_add_preserves_and_rejects_incompatible_database_schema(tmp_path) -> None:
     runner = CliRunner()
     db_path = tmp_path / "muse.db"
 
@@ -288,10 +274,15 @@ def test_add_resets_incompatible_database_schema(tmp_path) -> None:
         )
         conn.commit()
 
+    original = db_path.read_bytes()
     added = runner.invoke(app, ["--data-dir", str(tmp_path), "add", "hello"])
 
-    assert added.exit_code == 0, added.output
-    assert added.output == "added\n"
+    assert added.exit_code == 1, added.output
+    assert added.output == (
+        "error: queue database is incompatible; original data was preserved; "
+        "move muse.db and its sidecars before retrying\n"
+    )
+    assert db_path.read_bytes() == original
 
     with sqlite3.connect(db_path) as conn:
         tables = [
@@ -305,18 +296,6 @@ def test_add_resets_incompatible_database_schema(tmp_path) -> None:
                 """
             ).fetchall()
         ]
-        assert tables == ["items"]
-        columns = [
-            (row[1], row[2].upper(), row[3], row[4], row[5])
-            for row in conn.execute("PRAGMA table_info(items)").fetchall()
-        ]
-        assert columns == [
-            ("id", "INTEGER", 0, None, 1),
-            ("text", "TEXT", 1, None, 0),
-            ("status", "TEXT", 1, None, 0),
-            ("pinned", "INTEGER", 1, "0", 0),
-            ("created_at", "TEXT", 1, None, 0),
-            ("updated_at", "TEXT", 1, None, 0),
-        ]
-        rows = conn.execute("SELECT text, status, pinned FROM items").fetchall()
-        assert rows == [("hello", "inbox", 0)]
+        assert tables == ["items", "pins"]
+        rows = conn.execute("SELECT text, lane, status FROM items").fetchall()
+        assert rows == [("old row", "gather", "inbox")]
