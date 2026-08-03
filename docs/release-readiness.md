@@ -51,12 +51,18 @@ No Linux terminal was manually operated during this baseline pass. Linux
 pseudo-terminal readiness is covered by the installed-wheel package job, while
 the Ubuntu matrix covers non-interactive and headless behavior.
 
+Python 3.10 and 3.12 are inside the declared package range and have matching
+classifiers, but are not separate hosted matrix rows. Python 3.14 and newer are
+not excluded by the lower-bound metadata, but this baseline provides no direct
+compatibility evidence for them.
+
 ## Support boundary
 
-The supported Python versions are 3.9, 3.11, and 3.13. Textual is a required
-runtime dependency because a normal installation must make `muse --tui`
-immediately available; it remains lazily imported for help, subcommands, and
-non-interactive snapshot startup.
+The package requires Python 3.9 or newer. The release compatibility matrix
+directly verifies Python 3.9, 3.11, and 3.13. Textual is a required runtime
+dependency because a normal installation must make `muse --tui` immediately
+available; it remains lazily imported for help, subcommands, and non-interactive
+snapshot startup.
 
 This evidence does not claim that Windows interactive terminal behavior is
 identical to Unix, that Python versions outside the configured matrix work, or
